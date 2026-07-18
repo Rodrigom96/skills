@@ -1,0 +1,15 @@
+{
+  "name": "my-extension",
+  "scripts": {
+    "test": "npx tsx test/safe-commands.test.ts"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.10"
+  },
+  "pi": {
+    "displayName": "My Skills",
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}
