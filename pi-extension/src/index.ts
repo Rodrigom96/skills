@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isSafeCommand } from "./safe-command";
 export { isSafeCommand };
 
-export default function (pi: ExtensionAPI) {  // eslint-disable-line import/export
+export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.notify("Extension loaded!", "info");
   });
@@ -14,13 +14,14 @@ export default function (pi: ExtensionAPI) {  // eslint-disable-line import/expo
 
     if (isSafeCommand(command)) return;
 
-    const ok = await ctx.ui.confirm(
-      "Bash command",
-      `Allow:\n\n  ${command}`,
-    );
+    const ok = await ctx.ui.confirm("Bash command", `Allow:\n\n  ${command}`);
 
     if (!ok) {
-      return { block: true, reason: "Blocked by user" };
+      return {
+        block: true,
+        reason:
+          "User blocks mutating or non-allowlisted bash commands. Stop and wait for next instruction",
+      };
     }
   });
 }
