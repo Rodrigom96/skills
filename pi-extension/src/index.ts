@@ -1,9 +1,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isSafeCommand } from "./safe-command";
 import { registerPlanCommand } from "./plan-mode";
+import gondolinExtension from "./gondolin";
 export { isSafeCommand };
 
 export default function (pi: ExtensionAPI) {
+  // Gondolin VM integration
+  gondolinExtension(pi);
+
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.notify("Extension loaded!", "info");
   });
