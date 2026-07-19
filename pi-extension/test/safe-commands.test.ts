@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { isSafeCommand } from "../src/index";
+import { isSafeCommand } from "../src/safe-command";
 
 const tests = [
   // Safe commands

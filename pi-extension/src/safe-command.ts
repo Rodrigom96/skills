@@ -3,7 +3,7 @@
  */
 export const SAFE_PATTERNS = [
   /\bls\b/, /\btree\b/, /\bfind\b/,
-  /\bcat\b/, /\bhead\b/, /\btail\b/, /\bless\b/,
+  /\bcat\b/, /\bhead\b/, /\btail\b/, /\bless\b/, /\bmkdir\b/,
   /\bgrep\b/, /\brg\b/,
   /\bpwd\b/, /\bwhoami\b/, /\bdate\b/,
   /\bdiff\b/, /\bcomm\b/,

@@ -1,11 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isSafeCommand } from "./safe-command";
+import { registerPlanCommand } from "./plan-mode";
 export { isSafeCommand };
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.notify("Extension loaded!", "info");
   });
+
+  // Register the /plan command
+  registerPlanCommand(pi);
 
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return;
