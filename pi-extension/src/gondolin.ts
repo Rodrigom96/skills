@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import type {
@@ -15,7 +16,12 @@ import {
   type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
 
-import { RealFSProvider, VM } from "@earendil-works/gondolin";
+import {
+  RealFSProvider,
+  ShadowProvider,
+  createShadowPathPredicate,
+  VM,
+} from "@earendil-works/gondolin";
 
 const GUEST_WORKSPACE = "/workspace";
 
@@ -183,24 +189,56 @@ export default function (pi: ExtensionAPI) {
   let vm: VM | null = null;
   let vmStarting: Promise<VM> | null = null;
 
-  async function ensureVm(ctx?: ExtensionContext) {
+  async function ensureVm(
+    ctx?: ExtensionContext,
+    skillParentDirs?: string[],
+  ) {
     if (vm) return vm;
     if (vmStarting) return vmStarting;
 
     vmStarting = (async () => {
+      const mounts: Record<string, RealFSProvider> = {};
+
+      // Shadow node_modules from host mount so the VM's own copy is preserved
+      const hostHasNodeModules = existsSync(
+        path.join(localCwd, "node_modules"),
+      );
+
+      let provider: RealFSProvider;
+      if (hostHasNodeModules) {
+        const shadow = createShadowPathPredicate(["/node_modules"]);
+        provider = new ShadowProvider(new RealFSProvider(localCwd), {
+          shouldShadow: shadow,
+          writeMode: "tmpfs",
+        });
+      } else {
+        provider = new RealFSProvider(localCwd);
+      }
+
+      mounts[GUEST_WORKSPACE] = provider;
+
+      for (const skillParentDir of skillParentDirs ?? []) {
+        const key = skillParentDir;
+        if (key === GUEST_WORKSPACE || mounts[key]) continue; // avoid overwrites
+        mounts[key] = new RealFSProvider(skillParentDir);
+      }
+
+      const mountDescs = [
+        `${GUEST_WORKSPACE}=${localCwd}`,
+        ...((skillParentDirs ?? []).map((d) => `${d}=${d}`)),
+      ];
+
       ctx?.ui.setStatus(
         "gondolin",
         ctx.ui.theme.fg(
           "accent",
-          `Gondolin: starting (mount ${GUEST_WORKSPACE})`,
+          `Gondolin: starting (mount ${mountDescs.join(", ")})`,
         ),
       );
 
       const created = await VM.create({
         vfs: {
-          mounts: {
-            [GUEST_WORKSPACE]: new RealFSProvider(localCwd),
-          },
+          mounts,
         },
       });
 
@@ -209,7 +247,7 @@ export default function (pi: ExtensionAPI) {
         "gondolin",
         ctx.ui.theme.fg(
           "accent",
-          `Gondolin: running (${localCwd} -> ${GUEST_WORKSPACE})`,
+          `Gondolin: running (${localCwd} -> ${GUEST_WORKSPACE}, skills: ${(skillParentDirs ?? []).join(", ") || "none"})`,
         ),
       );
       ctx?.ui.notify(
@@ -222,10 +260,7 @@ export default function (pi: ExtensionAPI) {
     return vmStarting;
   }
 
-  pi.on("session_start", async (_event, ctx) => {
-    // Start eagerly so the user sees errors early (missing qemu, etc.)
-    await ensureVm(ctx);
-  });
+  // VM creation deferred to before_agent_start where skills are known.
 
   pi.on("session_shutdown", async (_event, ctx) => {
     if (!vm) return;
@@ -293,7 +328,19 @@ export default function (pi: ExtensionAPI) {
 
   // Replace the CWD line in the system prompt so the model sees /workspace
   pi.on("before_agent_start", async (event, ctx) => {
-    await ensureVm(ctx);
+    // Collect unique parent dirs of all loaded skill baseDirs
+    const skillParentDirs: string[] = [];
+    const seenParents = new Set<string>();
+    for (const skill of event.systemPromptOptions.skills ?? []) {
+      const parent = path.dirname(skill.baseDir);
+      const resolved = path.resolve(parent);
+      if (!seenParents.has(resolved)) {
+        seenParents.add(resolved);
+        skillParentDirs.push(resolved);
+      }
+    }
+
+    await ensureVm(ctx, skillParentDirs);
     const modified = event.systemPrompt.replace(
       `Current working directory: ${localCwd}`,
       `Current working directory: ${GUEST_WORKSPACE} (Gondolin VM, mounted from host: ${localCwd})`,
