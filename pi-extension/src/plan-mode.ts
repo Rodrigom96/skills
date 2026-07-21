@@ -19,9 +19,10 @@ export function registerPlanCommand(pi: ExtensionAPI): void {
     planModeEnabled = enabled;
 
     if (planModeEnabled) {
-      ctx.ui.setStatus(
+      ctx.ui.setWidget(
         "plan-mode",
-        ctx.ui.theme.fg("warning", "⏸ plan: write to .plans/ only"),
+        [ctx.ui.theme.fg("warning", "⏸ plan: write to .plans/ only")],
+        { placement: "belowEditor" },
       );
       ctx.ui.notify(
         "Plan mode ON: write/edit restricted to .plans/. Use finish_plan when done.",
@@ -29,7 +30,7 @@ export function registerPlanCommand(pi: ExtensionAPI): void {
       );
       ensureFinishPlanTool(true);
     } else {
-      ctx.ui.setStatus("plan-mode", undefined);
+      ctx.ui.setWidget("plan-mode", undefined);
       ctx.ui.notify("Plan mode OFF. All tools restored.", "info");
       ensureFinishPlanTool(false);
     }
@@ -179,7 +180,7 @@ export function registerPlanCommand(pi: ExtensionAPI): void {
 
     // Deactivate plan mode
     planModeEnabled = false;
-    ctx.ui.setStatus("plan-mode", undefined);
+    ctx.ui.setWidget("plan-mode", undefined);
     ensureFinishPlanTool(false);
 
     return {

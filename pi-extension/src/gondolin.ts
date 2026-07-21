@@ -50,19 +50,13 @@ export default function gondolinExtension(
     const wasActive = sb.getActive();
     await sb.start();
     if (!wasActive) {
-      ctx.ui.setStatus(
+      ctx.ui.setWidget(
         "gondolin",
-        ctx.ui.theme.fg(
-          "accent",
-          `Gondolin: starting (mounts: ${sb.mounts.map((m) => `${m.source}:${m.target}`).join(" | ")})`,
-        ),
-      );
-      ctx.ui.setStatus(
-        "gondolin",
-        ctx.ui.theme.fg(
+        [ctx.ui.theme.fg(
           "accent",
           `Gondolin: running (mounts: ${sb.mounts.map((m) => `${m.source}:${m.target}`).join(" | ")})`,
-        ),
+        )],
+        { placement: "belowEditor" },
       );
     }
   }
@@ -160,9 +154,10 @@ export default function gondolinExtension(
 
   pi.on("session_shutdown", async (_event, ctx) => {
     if (!activeSandbox || !activeSandbox.getActive()) return;
-    ctx.ui.setStatus(
+    ctx.ui.setWidget(
       "gondolin",
-      ctx.ui.theme.fg("muted", "Gondolin: stopping"),
+      [ctx.ui.theme.fg("muted", "Gondolin: stopping")],
+      { placement: "belowEditor" },
     );
     await activeSandbox.stop();
   });
