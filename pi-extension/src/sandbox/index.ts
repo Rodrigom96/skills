@@ -7,6 +7,7 @@ import type {
 import {
   createBashTool,
   createEditTool,
+  createLocalBashOperations,
   createReadTool,
   createWriteTool,
 } from "@earendil-works/pi-coding-agent";
@@ -129,6 +130,33 @@ export default function sandboxExtension(
     return { operations: activeSandbox.bashOp() };
   });
 
+  // host_bash: runs on host machine, always requires user approval
+  pi.registerTool(
+    (() => {
+      const tool = createBashTool(localCwd, {
+        operations: createLocalBashOperations(),
+      });
+      return {
+        ...tool,
+        name: "host_bash",
+        label: "Host Bash",
+        description: `Execute a bash command on the HOST machine (outside sandbox).
+
+Use 'host_bash' tool for: npm, python, yarn, pnpm, cargo, make, go build, or any package manager / build tool.
+Use 'bash' tool for: file ops, git, grep, find, ls, cat, and general shell commands.
+Every execution requires user approval.`,
+        execute: async (_id, params, signal, onUpdate, ctx) => {
+          const ok = await ctx.ui.confirm(
+            "Host Bash",
+            `Run on HOST:\n\n  ${params.command}\n\nAllow?`,
+          );
+          if (!ok) return { content: [{ type: "text", text: "Cancelled by user." }], details: {} };
+          return tool.execute(_id, params, signal, onUpdate, ctx);
+        },
+      };
+    })(),
+  );
+
   pi.on("before_agent_start", async (event, ctx) => {
     const skillParentDirs: string[] = [];
     const seenParents = new Set<string>();
@@ -144,7 +172,13 @@ export default function sandboxExtension(
     const activeSandbox = getOrCreateSandbox(ctx, skillParentDirs);
     await ensureStarted(activeSandbox, ctx);
 
-    return {};
+    const guidance = `
+
+You are working inside a Gondolin VM sandbox. File tools (read, write, edit) and 'bash' run inside this sandbox.
+
+The sandbox mounts your project and skill directories, so file paths and commands work the same as on the host. Some host tools (npm, python, cargo, make) are not available inside the sandbox — use 'host_bash' for those.
+`;
+    return { systemPrompt: event.systemPrompt + guidance };
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
