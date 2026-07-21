@@ -20,9 +20,16 @@ function shQuote(value: string): string {
 
 /** Resolve a local path to its guest path using the mount configuration. */
 function localPathToGuest(localPath: string, mounts: MountDir[]): string {
+  // If the path is already a guest path (starts with mount target), pass through
+  for (const mount of mounts) {
+    if (localPath === mount.target || localPath.startsWith(mount.target + path.posix.sep)) {
+      return localPath;
+    }
+  }
+  // Otherwise convert host path to guest path
   for (const mount of mounts) {
     const rel = path.relative(mount.source, localPath);
-    if (rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+    if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
       const posixRel = rel.split(path.sep).join(path.posix.sep);
       return path.posix.join(mount.target, posixRel);
     }
