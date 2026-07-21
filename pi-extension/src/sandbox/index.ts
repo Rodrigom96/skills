@@ -14,18 +14,17 @@ import {
 import { GondolinSandbox } from "./gondolin";
 import { SandboxBase, type MountDir } from "./base";
 
-const GUEST_WORKSPACE = "/workspace";
 
 function buildMounts(localCwd: string, skillParentDirs: string[]): MountDir[] {
-  const mounts: MountDir[] = [{ source: localCwd, target: GUEST_WORKSPACE }];
+  const mounts: MountDir[] = [{ path: localCwd }];
 
-  const seenTargets = new Set<string>();
-  seenTargets.add(GUEST_WORKSPACE);
+  const seenPaths = new Set<string>();
+  seenPaths.add(localCwd);
 
   for (const dir of skillParentDirs) {
-    if (!seenTargets.has(dir)) {
-      seenTargets.add(dir);
-      mounts.push({ source: dir, target: dir });
+    if (!seenPaths.has(dir)) {
+      seenPaths.add(dir);
+      mounts.push({ path: dir });
     }
   }
 
@@ -55,7 +54,7 @@ export default function sandboxExtension(
         "gondolin",
         [ctx.ui.theme.fg(
           "accent",
-          `Gondolin: running (mounts: ${sb.mounts.map((m) => `${m.source}:${m.target}`).join(" | ")})`,
+          `Gondolin: running (mounts: ${sb.mounts.map((m) => m.path).join(" | ")})`,
         )],
         { placement: "belowEditor" },
       );
@@ -145,12 +144,7 @@ export default function sandboxExtension(
     const activeSandbox = getOrCreateSandbox(ctx, skillParentDirs);
     await ensureStarted(activeSandbox, ctx);
 
-    const guestCwd = GUEST_WORKSPACE;
-    const modified = event.systemPrompt.replace(
-      `Current working directory: ${localCwd}`,
-      `Current working directory: ${guestCwd} (${activeSandbox.constructor.name}, mounted from host: ${localCwd})`,
-    );
-    return { systemPrompt: modified };
+    return {};
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {

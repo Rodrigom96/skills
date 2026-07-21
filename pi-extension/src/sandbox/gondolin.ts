@@ -18,25 +18,6 @@ function shQuote(value: string): string {
   return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
-/** Resolve a local path to its guest path using the mount configuration. */
-function localPathToGuest(localPath: string, mounts: MountDir[]): string {
-  // If the path is already a guest path (starts with mount target), pass through
-  for (const mount of mounts) {
-    if (localPath === mount.target || localPath.startsWith(mount.target + path.posix.sep)) {
-      return localPath;
-    }
-  }
-  // Otherwise convert host path to guest path
-  for (const mount of mounts) {
-    const rel = path.relative(mount.source, localPath);
-    if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
-      const posixRel = rel.split(path.sep).join(path.posix.sep);
-      return path.posix.join(mount.target, posixRel);
-    }
-  }
-  throw new Error(`path is not under any mount: ${localPath}`);
-}
-
 function sanitizeEnv(
   env?: NodeJS.ProcessEnv,
 ): Record<string, string> | undefined {
@@ -48,34 +29,31 @@ function sanitizeEnv(
   return out;
 }
 
-function createGondolinReadOps(vm: VM, mounts: MountDir[]): ReadOperations {
+function createGondolinReadOps(vm: VM): ReadOperations {
   return {
     readFile: async (p) => {
-      const guestPath = localPathToGuest(p, mounts);
-      const r = await vm.exec(["/bin/cat", guestPath]);
+      const r = await vm.exec(["/bin/cat", p]);
       if (!r.ok) {
         throw new Error(`cat failed (${r.exitCode}): ${r.stderr}`);
       }
       return r.stdoutBuffer;
     },
     access: async (p) => {
-      const guestPath = localPathToGuest(p, mounts);
       const r = await vm.exec([
         "/bin/sh",
         "-lc",
-        `test -r ${shQuote(guestPath)}`,
+        `test -r ${shQuote(p)}`,
       ]);
       if (!r.ok) {
         throw new Error(`not readable: ${p}`);
       }
     },
     detectImageMimeType: async (p) => {
-      const guestPath = localPathToGuest(p, mounts);
       try {
         const r = await vm.exec([
           "/bin/sh",
           "-lc",
-          `file --mime-type -b ${shQuote(guestPath)}`,
+          `file --mime-type -b ${shQuote(p)}`,
         ]);
         if (!r.ok) return null;
         const m = r.stdout.trim();
@@ -91,17 +69,16 @@ function createGondolinReadOps(vm: VM, mounts: MountDir[]): ReadOperations {
   };
 }
 
-function createGondolinWriteOps(vm: VM, mounts: MountDir[]): WriteOperations {
+function createGondolinWriteOps(vm: VM): WriteOperations {
   return {
     writeFile: async (p, content) => {
-      const guestPath = localPathToGuest(p, mounts);
-      const dir = path.posix.dirname(guestPath);
+      const dir = path.posix.dirname(p);
 
       const b64 = Buffer.from(content, "utf8").toString("base64");
       const script = [
         `set -eu`,
         `mkdir -p ${shQuote(dir)}`,
-        `echo ${shQuote(b64)} | base64 -d > ${shQuote(guestPath)}`,
+        `echo ${shQuote(b64)} | base64 -d > ${shQuote(p)}`,
       ].join("\n");
 
       const r = await vm.exec(["/bin/sh", "-lc", script]);
@@ -110,8 +87,7 @@ function createGondolinWriteOps(vm: VM, mounts: MountDir[]): WriteOperations {
       }
     },
     mkdir: async (dir) => {
-      const guestDir = localPathToGuest(dir, mounts);
-      const r = await vm.exec(["/bin/mkdir", "-p", guestDir]);
+      const r = await vm.exec(["/bin/mkdir", "-p", dir]);
       if (!r.ok) {
         throw new Error(`mkdir failed (${r.exitCode}): ${r.stderr}`);
       }
@@ -119,16 +95,15 @@ function createGondolinWriteOps(vm: VM, mounts: MountDir[]): WriteOperations {
   };
 }
 
-function createGondolinEditOps(vm: VM, mounts: MountDir[]): EditOperations {
-  const r = createGondolinReadOps(vm, mounts);
-  const w = createGondolinWriteOps(vm, mounts);
+function createGondolinEditOps(vm: VM): EditOperations {
+  const r = createGondolinReadOps(vm);
+  const w = createGondolinWriteOps(vm);
   return { readFile: r.readFile, access: r.access, writeFile: w.writeFile };
 }
 
-function createGondolinBashOps(vm: VM, mounts: MountDir[]): BashOperations {
+function createGondolinBashOps(vm: VM): BashOperations {
   return {
     exec: async (command, cwd, { onData, signal, timeout, env }) => {
-      const guestCwd = localPathToGuest(cwd, mounts);
 
       const ac = new AbortController();
       const onAbort = () => ac.abort();
@@ -145,7 +120,7 @@ function createGondolinBashOps(vm: VM, mounts: MountDir[]): BashOperations {
 
       try {
         const proc = vm.exec(["/bin/bash", "-lc", command], {
-          cwd: guestCwd,
+          cwd: cwd,
           signal: ac.signal,
           env: sanitizeEnv(env),
           stdout: "pipe",
@@ -180,22 +155,22 @@ export class GondolinSandbox extends SandboxBase {
 
   readOp(): ReadOperations {
     if (!this.vm) throw new Error("sandbox not running");
-    return createGondolinReadOps(this.vm, this.mounts);
+    return createGondolinReadOps(this.vm);
   }
 
   writeOp(): WriteOperations {
     if (!this.vm) throw new Error("sandbox not running");
-    return createGondolinWriteOps(this.vm, this.mounts);
+    return createGondolinWriteOps(this.vm);
   }
 
   editOp(): EditOperations {
     if (!this.vm) throw new Error("sandbox not running");
-    return createGondolinEditOps(this.vm, this.mounts);
+    return createGondolinEditOps(this.vm);
   }
 
   bashOp(): BashOperations {
     if (!this.vm) throw new Error("sandbox not running");
-    return createGondolinBashOps(this.vm, this.mounts);
+    return createGondolinBashOps(this.vm);
   }
 
   async start(): Promise<void> {
@@ -206,7 +181,7 @@ export class GondolinSandbox extends SandboxBase {
       const vmMounts: Record<string, RealFSProvider> = {};
 
       for (const mount of this.mounts) {
-        vmMounts[mount.target] = new RealFSProvider(mount.source);
+        vmMounts[mount.path] = new RealFSProvider(mount.path);
       }
 
       const created = await VM.create({

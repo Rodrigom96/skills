@@ -6,8 +6,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 export interface MountDir {
-  source: string;    // host path
-  target: string;    // guest mount point
+  path: string;
   readOnly?: boolean;
 }
 
