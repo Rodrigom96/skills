@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import path from "node:path";
 
 import type {
@@ -6,283 +5,99 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
-  type BashOperations,
   createBashTool,
   createEditTool,
   createReadTool,
   createWriteTool,
-  type EditOperations,
-  type ReadOperations,
-  type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
 
-import {
-  RealFSProvider,
-  ShadowProvider,
-  createShadowPathPredicate,
-  VM,
-} from "@earendil-works/gondolin";
+import { GondolinSandbox, type SandboxBase, type MountDir } from "./sandbox";
 
 const GUEST_WORKSPACE = "/workspace";
 
-function shQuote(value: string): string {
-  // POSIX shell quoting: wraps in single quotes and escapes internal quotes
-  return "'" + value.replace(/'/g, "'\\''") + "'";
-}
+function buildMounts(localCwd: string, skillParentDirs: string[]): MountDir[] {
+  const mounts: MountDir[] = [{ source: localCwd, target: GUEST_WORKSPACE }];
 
-function toGuestPath(localCwd: string, localPath: string): string {
-  // pi tools pass absolute local paths; map them into /workspace.
-  const rel = path.relative(localCwd, localPath);
-  if (rel === "") return GUEST_WORKSPACE;
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error(`path escapes workspace: ${localPath}`);
+  const seenTargets = new Set<string>();
+  seenTargets.add(GUEST_WORKSPACE);
+
+  for (const dir of skillParentDirs) {
+    if (!seenTargets.has(dir)) {
+      seenTargets.add(dir);
+      mounts.push({ source: dir, target: dir });
+    }
   }
-  // Convert platform separators to POSIX for the Linux guest
-  const posixRel = rel.split(path.sep).join(path.posix.sep);
-  return path.posix.join(GUEST_WORKSPACE, posixRel);
+
+  return mounts;
 }
 
-function createGondolinReadOps(vm: VM, localCwd: string): ReadOperations {
-  return {
-    readFile: async (p) => {
-      const guestPath = toGuestPath(localCwd, p);
-      const r = await vm.exec(["/bin/cat", guestPath]);
-      if (!r.ok) {
-        throw new Error(`cat failed (${r.exitCode}): ${r.stderr}`);
-      }
-      return r.stdoutBuffer;
-    },
-    access: async (p) => {
-      const guestPath = toGuestPath(localCwd, p);
-      const r = await vm.exec([
-        "/bin/sh",
-        "-lc",
-        `test -r ${shQuote(guestPath)}`,
-      ]);
-      if (!r.ok) {
-        throw new Error(`not readable: ${p}`);
-      }
-    },
-    detectImageMimeType: async (p) => {
-      const guestPath = toGuestPath(localCwd, p);
-      try {
-        // Run through the shell because `file` might live in `/usr/bin` depending on the image
-        const r = await vm.exec([
-          "/bin/sh",
-          "-lc",
-          `file --mime-type -b ${shQuote(guestPath)}`,
-        ]);
-        if (!r.ok) return null;
-        const m = r.stdout.trim();
-        return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(
-          m,
-        )
-          ? m
-          : null;
-      } catch {
-        return null;
-      }
-    },
-  };
-}
-
-function createGondolinWriteOps(vm: VM, localCwd: string): WriteOperations {
-  return {
-    writeFile: async (p, content) => {
-      const guestPath = toGuestPath(localCwd, p);
-      const dir = path.posix.dirname(guestPath);
-
-      // Base64 roundtrip to avoid quoting issues
-      const b64 = Buffer.from(content, "utf8").toString("base64");
-      const script = [
-        `set -eu`,
-        `mkdir -p ${shQuote(dir)}`,
-        `echo ${shQuote(b64)} | base64 -d > ${shQuote(guestPath)}`,
-      ].join("\n");
-
-      const r = await vm.exec(["/bin/sh", "-lc", script]);
-      if (!r.ok) {
-        throw new Error(`write failed (${r.exitCode}): ${r.stderr}`);
-      }
-    },
-    mkdir: async (dir) => {
-      const guestDir = toGuestPath(localCwd, dir);
-      const r = await vm.exec(["/bin/mkdir", "-p", guestDir]);
-      if (!r.ok) {
-        throw new Error(`mkdir failed (${r.exitCode}): ${r.stderr}`);
-      }
-    },
-  };
-}
-
-function createGondolinEditOps(vm: VM, localCwd: string): EditOperations {
-  const r = createGondolinReadOps(vm, localCwd);
-  const w = createGondolinWriteOps(vm, localCwd);
-  return { readFile: r.readFile, access: r.access, writeFile: w.writeFile };
-}
-
-function sanitizeEnv(
-  env?: NodeJS.ProcessEnv,
-): Record<string, string> | undefined {
-  if (!env) return undefined;
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env)) {
-    if (typeof v === "string") out[k] = v;
-  }
-  return out;
-}
-
-function createGondolinBashOps(vm: VM, localCwd: string): BashOperations {
-  return {
-    exec: async (command, cwd, { onData, signal, timeout, env }) => {
-      const guestCwd = toGuestPath(localCwd, cwd);
-
-      const ac = new AbortController();
-      const onAbort = () => ac.abort();
-      signal?.addEventListener("abort", onAbort, { once: true });
-
-      let timedOut = false;
-      const timer =
-        timeout && timeout > 0
-          ? setTimeout(() => {
-              timedOut = true;
-              ac.abort();
-            }, timeout * 1000)
-          : undefined;
-
-      try {
-        // `/bin/bash -lc` for a familiar environment (pipelines, expansions, etc.)
-        const proc = vm.exec(["/bin/bash", "-lc", command], {
-          cwd: guestCwd,
-          signal: ac.signal,
-          env: sanitizeEnv(env),
-          stdout: "pipe",
-          stderr: "pipe",
-        });
-
-        for await (const chunk of proc.output()) {
-          onData(chunk.data);
-        }
-
-        const r = await proc;
-        return { exitCode: r.exitCode };
-      } catch (err) {
-        if (signal?.aborted) throw new Error("aborted");
-        if (timedOut) throw new Error(`timeout:${timeout}`);
-        throw err;
-      } finally {
-        if (timer) clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-      }
-    },
-  };
-}
-
-export default function (pi: ExtensionAPI) {
+export default function gondolinExtension(
+  pi: ExtensionAPI,
+  sandbox: SandboxBase | null = null,
+) {
   const localCwd = process.cwd();
+  let activeSandbox: SandboxBase | undefined;
 
   const localRead = createReadTool(localCwd);
   const localWrite = createWriteTool(localCwd);
   const localEdit = createEditTool(localCwd);
   const localBash = createBashTool(localCwd);
 
-  let vm: VM | null = null;
-  let vmStarting: Promise<VM> | null = null;
-
-  async function ensureVm(
-    ctx?: ExtensionContext,
-    skillParentDirs?: string[],
-  ) {
-    if (vm) return vm;
-    if (vmStarting) return vmStarting;
-
-    vmStarting = (async () => {
-      const mounts: Record<string, RealFSProvider> = {};
-
-      // Shadow node_modules from host mount so the VM's own copy is preserved
-      const hostHasNodeModules = existsSync(
-        path.join(localCwd, "node_modules"),
-      );
-
-      let provider: RealFSProvider;
-      if (hostHasNodeModules) {
-        const shadow = createShadowPathPredicate(["/node_modules"]);
-        provider = new ShadowProvider(new RealFSProvider(localCwd), {
-          shouldShadow: shadow,
-          writeMode: "tmpfs",
-        });
-      } else {
-        provider = new RealFSProvider(localCwd);
-      }
-
-      mounts[GUEST_WORKSPACE] = provider;
-
-      for (const skillParentDir of skillParentDirs ?? []) {
-        const key = skillParentDir;
-        if (key === GUEST_WORKSPACE || mounts[key]) continue; // avoid overwrites
-        mounts[key] = new RealFSProvider(skillParentDir);
-      }
-
-      const mountDescs = [
-        `${GUEST_WORKSPACE}=${localCwd}`,
-        ...((skillParentDirs ?? []).map((d) => `${d}=${d}`)),
-      ];
-
-      ctx?.ui.setStatus(
+  async function ensureStarted(
+    sb: SandboxBase,
+    ctx: ExtensionContext,
+  ): Promise<void> {
+    const wasActive = sb.getActive();
+    await sb.start();
+    if (!wasActive) {
+      ctx.ui.setStatus(
         "gondolin",
         ctx.ui.theme.fg(
           "accent",
-          `Gondolin: starting (mount ${mountDescs.join(", ")})`,
+          `Gondolin: starting (mounts: ${sb.mounts.map((m) => `${m.source}:${m.target}`).join(" | ")})`,
         ),
       );
-
-      const created = await VM.create({
-        vfs: {
-          mounts,
-        },
-      });
-
-      vm = created;
-      ctx?.ui.setStatus(
+      ctx.ui.setStatus(
         "gondolin",
         ctx.ui.theme.fg(
           "accent",
-          `Gondolin: running (${localCwd} -> ${GUEST_WORKSPACE}, skills: ${(skillParentDirs ?? []).join(", ") || "none"})`,
+          `Gondolin: running (mounts: ${sb.mounts.map((m) => `${m.source}:${m.target}`).join(" | ")})`,
         ),
       );
-      ctx?.ui.notify(
-        `Gondolin VM ready. Host ${localCwd} mounted at ${GUEST_WORKSPACE}`,
-        "info",
-      );
-      return created;
-    })();
-
-    return vmStarting;
+    }
   }
 
-  // VM creation deferred to before_agent_start where skills are known.
-
-  pi.on("session_shutdown", async (_event, ctx) => {
-    if (!vm) return;
-    ctx.ui.setStatus(
-      "gondolin",
-      ctx.ui.theme.fg("muted", "Gondolin: stopping"),
-    );
-    try {
-      await vm.close();
-    } finally {
-      vm = null;
-      vmStarting = null;
+  function getOrCreateSandbox(
+    ctx: ExtensionContext,
+    skillParentDirs: string[],
+  ): SandboxBase {
+    if (sandbox) return sandbox;
+    if (!activeSandbox) {
+      const mounts = buildMounts(localCwd, skillParentDirs);
+      activeSandbox = new GondolinSandbox(mounts);
     }
-  });
+    return activeSandbox;
+  }
+
+  async function ensureOps(
+    ctx: ExtensionContext,
+    skillParentDirs?: string[],
+  ) {
+    const sb = getOrCreateSandbox(ctx, skillParentDirs ?? []);
+    await ensureStarted(sb, ctx);
+    return {
+      read: sb.readOp(),
+      write: sb.writeOp(),
+      edit: sb.editOp(),
+      bash: sb.bashOp(),
+    };
+  }
 
   pi.registerTool({
     ...localRead,
     async execute(id, params, signal, onUpdate, ctx) {
-      const activeVm = await ensureVm(ctx);
-      const tool = createReadTool(localCwd, {
-        operations: createGondolinReadOps(activeVm, localCwd),
-      });
+      const ops = await ensureOps(ctx);
+      const tool = createReadTool(localCwd, { operations: ops.read });
       return tool.execute(id, params, signal, onUpdate);
     },
   });
@@ -290,10 +105,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     ...localWrite,
     async execute(id, params, signal, onUpdate, ctx) {
-      const activeVm = await ensureVm(ctx);
-      const tool = createWriteTool(localCwd, {
-        operations: createGondolinWriteOps(activeVm, localCwd),
-      });
+      const ops = await ensureOps(ctx);
+      const tool = createWriteTool(localCwd, { operations: ops.write });
       return tool.execute(id, params, signal, onUpdate);
     },
   });
@@ -301,10 +114,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     ...localEdit,
     async execute(id, params, signal, onUpdate, ctx) {
-      const activeVm = await ensureVm(ctx);
-      const tool = createEditTool(localCwd, {
-        operations: createGondolinEditOps(activeVm, localCwd),
-      });
+      const ops = await ensureOps(ctx);
+      const tool = createEditTool(localCwd, { operations: ops.edit });
       return tool.execute(id, params, signal, onUpdate);
     },
   });
@@ -312,23 +123,19 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     ...localBash,
     async execute(id, params, signal, onUpdate, ctx) {
-      const activeVm = await ensureVm(ctx);
-      const tool = createBashTool(localCwd, {
-        operations: createGondolinBashOps(activeVm, localCwd),
-      });
+      const ops = await ensureOps(ctx);
+      const tool = createBashTool(localCwd, { operations: ops.bash });
       return tool.execute(id, params, signal, onUpdate);
     },
   });
 
-  // Run user `!` commands inside the VM too
+  // Run user `!` commands inside the sandbox too
   pi.on("user_bash", (_event, ctx) => {
-    if (!vm) return;
-    return { operations: createGondolinBashOps(vm, localCwd) };
+    if (!activeSandbox || !activeSandbox.getActive()) return;
+    return { operations: activeSandbox.bashOp() };
   });
 
-  // Replace the CWD line in the system prompt so the model sees /workspace
   pi.on("before_agent_start", async (event, ctx) => {
-    // Collect unique parent dirs of all loaded skill baseDirs
     const skillParentDirs: string[] = [];
     const seenParents = new Set<string>();
     for (const skill of event.systemPromptOptions.skills ?? []) {
@@ -340,11 +147,23 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    await ensureVm(ctx, skillParentDirs);
+    const activeSandbox = getOrCreateSandbox(ctx, skillParentDirs);
+    await ensureStarted(activeSandbox, ctx);
+
+    const guestCwd = GUEST_WORKSPACE;
     const modified = event.systemPrompt.replace(
       `Current working directory: ${localCwd}`,
-      `Current working directory: ${GUEST_WORKSPACE} (Gondolin VM, mounted from host: ${localCwd})`,
+      `Current working directory: ${guestCwd} (${activeSandbox.constructor.name}, mounted from host: ${localCwd})`,
     );
     return { systemPrompt: modified };
+  });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    if (!activeSandbox || !activeSandbox.getActive()) return;
+    ctx.ui.setStatus(
+      "gondolin",
+      ctx.ui.theme.fg("muted", "Gondolin: stopping"),
+    );
+    await activeSandbox.stop();
   });
 }
