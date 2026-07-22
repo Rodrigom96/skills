@@ -11,5 +11,8 @@
     "extensions": [
       "./src/index.ts"
     ]
+  },
+  "dependencies": {
+    "@earendil-works/gondolin": "^0.5.0"
   }
 }
