@@ -28,7 +28,7 @@ export default function (pi: ExtensionAPI) {
       return {
         block: true,
         reason:
-          "User blocks mutating or non-allowlisted bash commands. Stop and wait for next instruction",
+          "User blocks bash commands. Stop and wait for next instruction",
       };
     }
   });

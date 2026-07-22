@@ -130,6 +130,26 @@ export default function sandboxExtension(
     return { operations: activeSandbox.bashOp() };
   });
 
+  // Block host_bash until user approves (prevents execution + stops agent)
+  pi.on("tool_call", async (event, ctx) => {
+    if (event.toolName !== "host_bash") return;
+
+    const command = (event.input as { command: string }).command;
+
+    const ok = await ctx.ui.confirm(
+      "Host Bash",
+      `Run on HOST:\n\n  ${command}\n\nAllow?`,
+    );
+
+    if (!ok) {
+      return {
+        block: true,
+        reason:
+          "User blocks host_bash commands. Stop and wait for next instruction",
+      };
+    }
+  });
+
   // host_bash: runs on host machine, always requires user approval
   pi.registerTool(
     (() => {
@@ -146,11 +166,6 @@ Use 'host_bash' tool for: npm, python, yarn, pnpm, cargo, make, go build, or any
 Use 'bash' tool for: file ops, git, grep, find, ls, cat, and general shell commands.
 Every execution requires user approval.`,
         execute: async (_id, params, signal, onUpdate, ctx) => {
-          const ok = await ctx.ui.confirm(
-            "Host Bash",
-            `Run on HOST:\n\n  ${params.command}\n\nAllow?`,
-          );
-          if (!ok) return { content: [{ type: "text", text: "Cancelled by user." }], details: {} };
           return tool.execute(_id, params, signal, onUpdate, ctx);
         },
       };
