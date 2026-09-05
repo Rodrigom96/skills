@@ -1,37 +1,25 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getDefaultModel, getModeModel } from "../models/settings";
 import type { createToolManager } from "../tools/manager";
-import { selectConfiguredModel, updateModeUi } from "./helpers";
 import { Mode } from "./mode";
-import type { createModeRegistry } from "./registry";
+import type { createModeManager } from "./manager";
 
 class CodeMode extends Mode {
-  constructor(private readonly pi: ExtensionAPI, private readonly tools: ReturnType<typeof createToolManager>) {
-    super("code", "💻");
+  constructor() {
+    super("code", "💻", "Implement and modify the project.");
   }
 
-  async enter(ctx: ExtensionContext): Promise<void> {
-    await selectConfiguredModel(this.pi, ctx, await getModeModel("code"));
-    updateModeUi(ctx, this);
-    ctx.ui.notify("Code mode ON.", "info");
-    this.tools.setPlanMode(false);
-  }
+  async enter(_ctx: ExtensionContext): Promise<void> {}
 
-  async exit(ctx: ExtensionContext): Promise<void> {
-    await selectConfiguredModel(this.pi, ctx, await getDefaultModel());
-    updateModeUi(ctx, undefined);
-    ctx.ui.notify("Code mode OFF.", "info");
-    this.tools.setPlanMode(false);
-  }
+  async exit(_ctx: ExtensionContext): Promise<void> {}
 }
 
 export function registerCodeMode(
   pi: ExtensionAPI,
   tools: ReturnType<typeof createToolManager>,
-  registry: ReturnType<typeof createModeRegistry>,
+  registry: ReturnType<typeof createModeManager>,
 ): Mode {
-  const mode = new CodeMode(pi, tools);
-  registry.register(mode);
+  const mode = new CodeMode();
+  registry.register(mode, { onEnterMessage: "Code mode ON.", onExitMessage: "Code mode OFF." });
   pi.registerCommand("code", {
     description: "Toggle code mode or implement a plan: /code <plan file>",
     handler: async (args, ctx) => {

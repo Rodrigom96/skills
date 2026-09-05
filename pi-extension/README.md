@@ -8,7 +8,7 @@ Plan mode can use a separate model configured globally in `~/.pi/agent/settings.
 {"modes": {"plan": {"model": "provider/model-id"}}}
 ```
 
-Use `/mode-model` to configure, view, or reset assignments. Entering plan mode selects its configured model; leaving selects the configured startup default. A model chosen manually while planning is preserved on exit. Changing an assignment does not change the currently active model.
+Use `/mode-model` to configure, view, or reset assignments. Entering any mode selects its configured model when available; leaving selects the configured startup default. Changing an assignment does not change the currently active model.
 
 This extension runs pi's `read`, `write`, `edit`, and `bash` tools (including user `!` commands) in a sandbox. Docker is the default; Gondolin remains available as an opt-in backend.
 

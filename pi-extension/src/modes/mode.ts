@@ -1,15 +1,17 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-export abstract class Mode {
+export class Mode {
   readonly name: string;
   readonly icon: string;
+  readonly description?: string;
 
-  constructor(name: string, icon: string) {
+  constructor(name: string, icon: string, description?: string) {
     this.name = name;
     this.icon = icon;
+    this.description = description;
   }
 
-  abstract enter(ctx: ExtensionContext): Promise<void> | void;
-  abstract exit(ctx: ExtensionContext): Promise<void> | void;
+  enter(_ctx: ExtensionContext): Promise<void> | void {}
+  exit(_ctx: ExtensionContext): Promise<void> | void {}
   onModelSelect(): void {}
 }
