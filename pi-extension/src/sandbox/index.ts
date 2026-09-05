@@ -13,7 +13,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { GondolinSandbox } from "./gondolin";
+import { DockerSandbox, selectBackend, type Backend } from "./docker";
 import { SandboxBase, type MountDir } from "./base";
+
+export { selectBackend };
 
 
 function buildMounts(localCwd: string, skillParentDirs: string[]): MountDir[] {
@@ -37,7 +40,19 @@ export default function sandboxExtension(
   sandbox: SandboxBase | null = null,
 ) {
   const localCwd = process.cwd();
-  let activeSandbox: SandboxBase | undefined;
+  const injected = sandbox;
+  let activeSandbox: SandboxBase | undefined = injected ?? undefined;
+  let backend: Backend = selectBackend();
+  let skillParentDirs: string[] = [];
+
+  function backendLabel(sb = activeSandbox): string {
+    return sb instanceof DockerSandbox ? `Docker (${sb.image})` : "Gondolin";
+  }
+
+  function createSandbox(kind: Backend): SandboxBase {
+    const mounts = buildMounts(localCwd, skillParentDirs);
+    return kind === "docker" ? new DockerSandbox(mounts) : new GondolinSandbox(mounts);
+  }
 
   const localRead = createReadTool(localCwd);
   const localWrite = createWriteTool(localCwd);
@@ -52,10 +67,10 @@ export default function sandboxExtension(
     await sb.start();
     if (!wasActive) {
       ctx.ui.setWidget(
-        "gondolin",
+        "sandbox",
         [ctx.ui.theme.fg(
           "accent",
-          `Gondolin: running (mounts: ${sb.mounts.map((m) => m.path).join(" | ")})`,
+          `${backendLabel(sb)}: running (mounts: ${sb.mounts.map((m) => m.path).join(" | ")})`,
         )],
         { placement: "belowEditor" },
       );
@@ -66,11 +81,8 @@ export default function sandboxExtension(
     ctx: ExtensionContext,
     skillParentDirs: string[],
   ): SandboxBase {
-    if (sandbox) return sandbox;
-    if (!activeSandbox) {
-      const mounts = buildMounts(localCwd, skillParentDirs);
-      activeSandbox = new GondolinSandbox(mounts);
-    }
+    if (injected) return injected;
+    if (!activeSandbox) activeSandbox = createSandbox(backend);
     return activeSandbox;
   }
 
@@ -124,6 +136,37 @@ export default function sandboxExtension(
     },
   });
 
+  pi.registerCommand("sandbox", {
+    description: "Switch or inspect the sandbox backend (gondolin or docker)",
+    getArgumentCompletions: (prefix) => ["gondolin", "docker"]
+      .filter((name) => name.startsWith(prefix)).map((value) => ({ value, label: value })),
+    handler: async (args, ctx) => {
+      if (injected) {
+        ctx.ui.notify("Sandbox backend cannot be switched when a custom sandbox was injected.", "warning");
+        return;
+      }
+      let requested = args.trim() as Backend | "";
+      if (!requested) {
+        const choice = await ctx.ui.select("Select sandbox backend:", ["gondolin", "docker"]);
+        if (!choice) return;
+        requested = choice as Backend;
+      }
+      if (requested !== "gondolin" && requested !== "docker") {
+        ctx.ui.notify("Usage: /sandbox [gondolin|docker]", "warning");
+        return;
+      }
+      if (requested === backend && activeSandbox?.getActive()) {
+        ctx.ui.notify(`${backendLabel()} is already active.`, "info");
+        return;
+      }
+      if (activeSandbox) await activeSandbox.stop();
+      activeSandbox = createSandbox(requested);
+      backend = requested;
+      await ensureStarted(activeSandbox, ctx);
+      ctx.ui.notify(`Switched to ${backendLabel()}.`, "info");
+    },
+  });
+
   // Run user `!` commands inside the sandbox too
   pi.on("user_bash", (_event, ctx) => {
     if (!activeSandbox || !activeSandbox.getActive()) return;
@@ -173,25 +216,26 @@ Every execution requires user approval.`,
   );
 
   pi.on("before_agent_start", async (event, ctx) => {
-    const skillParentDirs: string[] = [];
+    const nextSkillParentDirs: string[] = [];
     const seenParents = new Set<string>();
     for (const skill of event.systemPromptOptions.skills ?? []) {
       const parent = path.dirname(skill.baseDir);
       const resolved = path.resolve(parent);
       if (!seenParents.has(resolved)) {
         seenParents.add(resolved);
-        skillParentDirs.push(resolved);
+        nextSkillParentDirs.push(resolved);
       }
     }
 
-    const activeSandbox = getOrCreateSandbox(ctx, skillParentDirs);
-    await ensureStarted(activeSandbox, ctx);
+    skillParentDirs = nextSkillParentDirs;
+    const currentSandbox = getOrCreateSandbox(ctx, skillParentDirs);
+    await ensureStarted(currentSandbox, ctx);
 
     const guidance = `
 
-You are working inside a Gondolin VM sandbox. File tools (read, write, edit) and 'bash' run inside this sandbox.
+You are working inside a ${backendLabel(currentSandbox)} sandbox. File tools (read, write, edit) and 'bash' run inside this sandbox.
 
-The sandbox mounts your project and skill directories, so file paths and commands work the same as on the host. Some host tools (npm, python, cargo, make) are not available inside the sandbox — use 'host_bash' for those.
+The sandbox mounts your project and skill directories, so file paths and commands work the same as on the host. Container tools depend on the selected image. Some host tools (npm, python, cargo, make) may not be available inside the sandbox — use 'host_bash' for those.
 `;
     return { systemPrompt: event.systemPrompt + guidance };
   });
@@ -199,8 +243,8 @@ The sandbox mounts your project and skill directories, so file paths and command
   pi.on("session_shutdown", async (_event, ctx) => {
     if (!activeSandbox || !activeSandbox.getActive()) return;
     ctx.ui.setWidget(
-      "gondolin",
-      [ctx.ui.theme.fg("muted", "Gondolin: stopping")],
+      "sandbox",
+      [ctx.ui.theme.fg("muted", `${backendLabel()}: stopping`)],
       { placement: "belowEditor" },
     );
     await activeSandbox.stop();
