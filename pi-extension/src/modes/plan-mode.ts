@@ -1,8 +1,8 @@
-import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isSafeCommand } from "../safe-command";
 import { getDefaultModel, getModeModel, type ModelIdentity } from "../models/settings";
 import { createModeRegistry } from "./registry";
+import type { createToolManager } from "../tools/manager";
 
 const PLANS_DIR = ".plans/";
 interface PlanModeState { enabled: boolean; }
@@ -11,7 +11,7 @@ function isPathInPlans(path: string): boolean {
   return path === ".plans" || path.startsWith(PLANS_DIR) || path.startsWith("./" + PLANS_DIR) || path.includes("/.plans/");
 }
 
-export function registerPlanCommand(pi: ExtensionAPI) {
+export function registerPlanCommand(pi: ExtensionAPI, tools: ReturnType<typeof createToolManager>) {
   const registry = createModeRegistry(pi);
   let planModeEnabled = false;
   let manualModelChange = false;
@@ -29,22 +29,6 @@ export function registerPlanCommand(pi: ExtensionAPI) {
     }
   }
 
-  function ensureFinishPlanTool(active: boolean): void {
-    const currentTools = pi.getAllTools().map((t) => t.name);
-    if (active && !currentTools.includes("finish_plan")) {
-      pi.registerTool({
-        name: "finish_plan", label: "Finish Plan",
-        description: "Signal that planning is complete. Shows a selector to implement the plan or continue refining it.",
-        parameters: Type.Object({ planFilePath: Type.String({ description: "Path to the plan file in .plans/" }) }),
-        async execute(_id, params, _signal, _update, ctx) { return handleFinishPlan(params.planFilePath, ctx); },
-      });
-    } else if (active && currentTools.includes("finish_plan") && !pi.getActiveTools().includes("finish_plan")) {
-      pi.setActiveTools([...pi.getActiveTools(), "finish_plan"]);
-    } else if (!active && currentTools.includes("finish_plan")) {
-      pi.setActiveTools(pi.getActiveTools().filter((n) => n !== "finish_plan"));
-    }
-  }
-
   const planMode = {
     name: "plan",
     async enter(ctx: ExtensionContext) {
@@ -53,7 +37,7 @@ export function registerPlanCommand(pi: ExtensionAPI) {
       await selectConfigured(ctx, await getModeModel("plan"));
       ctx.ui.setWidget("plan-mode", [ctx.ui.theme.fg("warning", "⏸ plan: write to .plans/ only")], { placement: "belowEditor" });
       ctx.ui.notify("Plan mode ON: write/edit restricted to .plans/. Use finish_plan when done.", "info");
-      ensureFinishPlanTool(true);
+      tools.setPlanMode(true);
     },
     async exit(ctx: ExtensionContext) {
       if (!manualModelChange) await selectConfigured(ctx, await getDefaultModel());
@@ -61,7 +45,7 @@ export function registerPlanCommand(pi: ExtensionAPI) {
       manualModelChange = false;
       ctx.ui.setWidget("plan-mode", undefined);
       ctx.ui.notify("Plan mode OFF. All tools restored.", "info");
-      ensureFinishPlanTool(false);
+      tools.setPlanMode(false);
     },
     onModelSelect() { if (!automaticModelChange && planModeEnabled) manualModelChange = true; },
   };
@@ -119,5 +103,6 @@ export function registerPlanCommand(pi: ExtensionAPI) {
     return { content: [{ type: "text" as const, text: `User accepted the plan. Implement ${planFilePath}.` }], details: {} };
   }
 
+  tools.setFinishPlanHandler(handleFinishPlan);
   return registry;
 }

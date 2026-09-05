@@ -1,10 +1,12 @@
 {
   "name": "my-extension",
   "scripts": {
-    "test": "npx tsx test/safe-commands.test.ts && npx tsx test/model-settings.test.ts"
+    "test": "npx tsx test/safe-commands.test.ts && npx tsx test/model-settings.test.ts && npx tsx test/tool-manager.test.ts && npx tsx test/ask-question.test.ts"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.10"
+    "@earendil-works/pi-coding-agent": "^0.80.10",
+    "@earendil-works/pi-tui": "^0.80.10",
+    "typebox": "1.1.38"
   },
   "pi": {
     "displayName": "My Skills",
