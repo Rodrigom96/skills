@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isSafeCommand } from "./safe-command";
-import { registerPlanCommand } from "./modes/plan-mode";
+import { registerModes } from "./modes";
 import { modelLabel } from "./models/selector";
 import { getModeModel, setModeModel } from "./models/settings";
 import sandboxExtension from "./sandbox";
@@ -11,7 +11,7 @@ export default function (pi: ExtensionAPI) {
   sandboxExtension(pi);
   pi.on("session_start", async (_event, ctx) => ctx.ui.notify("Extension loaded!", "info"));
   const tools = createToolManager(pi);
-  const registry = registerPlanCommand(pi, tools);
+  const registry = registerModes(pi, tools);
 
   pi.registerCommand("mode-model", {
     description: "Configure, view, or reset models assigned to modes",

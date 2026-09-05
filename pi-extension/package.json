@@ -1,7 +1,7 @@
 {
   "name": "my-extension",
   "scripts": {
-    "test": "npx tsx test/safe-commands.test.ts && npx tsx test/model-settings.test.ts && npx tsx test/tool-manager.test.ts && npx tsx test/ask-question.test.ts"
+    "test": "npx tsx test/safe-commands.test.ts && npx tsx test/model-settings.test.ts && npx tsx test/tool-manager.test.ts && npx tsx test/ask-question.test.ts && npx tsx test/modes-registry.test.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.10",

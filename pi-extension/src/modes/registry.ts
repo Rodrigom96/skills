@@ -1,7 +1,7 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Mode } from "./mode";
 
-export function createModeRegistry(_pi: ExtensionAPI) {
+export function createModeRegistry() {
   const modes = new Map<string, Mode>();
   let active: Mode | undefined;
   return {
@@ -18,6 +18,6 @@ export function createModeRegistry(_pi: ExtensionAPI) {
       if (active) await active.enter(ctx);
       return true;
     },
-    notifyManualModelChange(): void { active?.onModelSelect?.(); },
+    notifyManualModelChange(): void { active?.onModelSelect(); },
   };
 }
