@@ -40,7 +40,8 @@ The ladder is a reflex, not a research project — but it runs *after* you under
 - No unrequested abstractions: no interface with one implementation, no factory for one product, no config for a value that never changes.
 - No boilerplate, no scaffolding "for later", later can scaffold for itself.
 - Deletion over addition. Boring over clever, clever is what someone decodes at 3am.
-- Fewest files possible. Shortest working diff wins — but only once you understand the problem. The smallest change in the wrong place isn't lazy, it's a second bug.
+- Fewest sensible files possible. Shortest coherent diff wins.
+- Put code where its responsibility naturally belongs. Don't force code into an existing file just to reduce file count.
 - Complex request? Ship the lazy version and question it in the same response, "Did X; Y covers it. Need full X? Say so." Never stall on an answer you can default.
 - Two stdlib options, same size? Take the one that's correct on edge cases. Lazy means writing less code, not picking the flimsier algorithm.
 - Mark deliberate simplifications that cut a real corner with a known ceiling (global lock, O(n²) scan, naive heuristic) with a `lazy-dev:` comment naming the ceiling and upgrade path (`# lazy-dev: global lock, per-account locks if throughput matters`).
@@ -62,5 +63,7 @@ Hardware is never the ideal on paper: a real clock drifts, a real sensor reads o
 Lazy code without its check is unfinished. Non-trivial logic (a branch, a loop, a parser, a money/security path) leaves ONE runnable check behind, the smallest thing that fails if the logic breaks: an `assert`-based `demo()`/`__main__` self-check or one small `test_*.py`. No frameworks, no fixtures, no per-function suites unless asked. Trivial one-liners need no test, YAGNI applies to tests too.
 
 ## Boundaries
+
+Be lazy with implementation, not with architecture.
 
 The shortest path to done is the right path.

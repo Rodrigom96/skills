@@ -130,7 +130,9 @@ export class DockerSandbox extends SandboxBase {
     if (this.starting) return this.starting;
     this.starting = (async () => {
       const name = `pi-sandbox-${randomUUID()}`;
-      const result = await this.run(["run", "-d", "--name", name, ...dockerMountArgs(this.mounts), this.image, "tail", "-f", "/dev/null"]);
+      const uid = process.getuid?.(), gid = process.getgid?.();
+      const user = uid !== undefined && gid !== undefined ? ["--user", `${uid}:${gid}`] : [];
+      const result = await this.run(["run", "-d", "--name", name, ...user, ...dockerMountArgs(this.mounts), this.image, "tail", "-f", "/dev/null"]);
       if (result.code !== 0) throw new Error(`Docker sandbox failed to start: ${result.stderr.trim() || result.stdout.toString().trim()}`);
       this.container = name;
     })().finally(() => { this.starting = null; });
