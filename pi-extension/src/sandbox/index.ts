@@ -49,9 +49,15 @@ export default function sandboxExtension(
     return sb instanceof DockerSandbox ? `Docker (${sb.image})` : "Gondolin";
   }
 
-  function createSandbox(kind: Backend): SandboxBase {
-    const mounts = buildMounts(localCwd, skillParentDirs);
+  function createSandbox(kind: Backend, dirs = skillParentDirs): SandboxBase {
+    const mounts = buildMounts(localCwd, dirs);
     return kind === "docker" ? new DockerSandbox(mounts) : new GondolinSandbox(mounts);
+  }
+
+  function mountsMatch(sb: SandboxBase, mounts: MountDir[]): boolean {
+    return sb.mounts.length === mounts.length && sb.mounts.every((mount, i) =>
+      mount.path === mounts[i].path && !!mount.readOnly === !!mounts[i].readOnly,
+    );
   }
 
   const localRead = createReadTool(localCwd);
@@ -82,7 +88,7 @@ export default function sandboxExtension(
     skillParentDirs: string[],
   ): SandboxBase {
     if (injected) return injected;
-    if (!activeSandbox) activeSandbox = createSandbox(backend);
+    if (!activeSandbox) activeSandbox = createSandbox(backend, skillParentDirs);
     return activeSandbox;
   }
 
@@ -215,6 +221,10 @@ Every execution requires user approval.`,
     })(),
   );
 
+  pi.on("session_start", async (_event, ctx) => {
+    await ensureStarted(getOrCreateSandbox(ctx, skillParentDirs), ctx);
+  });
+
   pi.on("before_agent_start", async (event, ctx) => {
     const nextSkillParentDirs: string[] = [];
     const seenParents = new Set<string>();
@@ -228,8 +238,13 @@ Every execution requires user approval.`,
     }
 
     skillParentDirs = nextSkillParentDirs;
-    const currentSandbox = getOrCreateSandbox(ctx, skillParentDirs);
-    await ensureStarted(currentSandbox, ctx);
+    let currentSandbox = getOrCreateSandbox(ctx, skillParentDirs);
+    const requiredMounts = buildMounts(localCwd, skillParentDirs);
+    if (!injected && !mountsMatch(currentSandbox, requiredMounts)) {
+      await currentSandbox.stop();
+      activeSandbox = currentSandbox = createSandbox(backend, skillParentDirs);
+    }
+    if (!currentSandbox.getActive()) await ensureStarted(currentSandbox, ctx);
 
     const guidance = `
 
