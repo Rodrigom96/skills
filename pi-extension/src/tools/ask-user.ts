@@ -1,7 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-const OTHER_VALUE = "\u0000ask-question-other";
+const OTHER_VALUE = "\u0000ask-user-other";
 
 const OptionSchema = Type.Object({
   answer: Type.String({ description: "The answer value returned when this option is selected" }),
@@ -37,15 +37,14 @@ async function selectOption(
   return options[labels.indexOf(selected)]?.answer;
 }
 
-export function createAskQuestionTool() {
+export function createAskUserTool() {
   return {
-    name: "ask_question",
+    name: "ask_user",
     label: "Ask Question",
-    description: "Ask the user one focused question when a missing decision blocks progress.",
-    promptSnippet: "Ask the user one focused question when a missing decision blocks progress",
+    description: "Use ask_user to ask the user questions and collect responses.",
+    promptSnippet: "Use ask_user to ask the user questions and collect responses",
     promptGuidelines: [
-      "Use ask_question only when a missing user decision blocks progress.",
-      "Ask one focused question at a time.",
+      "Use ask_user to ask the user questions and collect responses.",
     ],
     parameters: Type.Object({
       question: Type.String({ description: "The focused question to ask the user" }),

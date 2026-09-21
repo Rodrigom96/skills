@@ -1,7 +1,7 @@
 import assert from "node:assert";
-import { createAskQuestionTool } from "../src/tools/ask-question";
+import { createAskUserTool } from "../src/tools/ask-user";
 
-const tool = createAskQuestionTool();
+const tool = createAskUserTool();
 
 function context(select: (question: string, options: string[]) => Promise<string | undefined>, input = "") {
   return {
@@ -11,6 +11,8 @@ function context(select: (question: string, options: string[]) => Promise<string
 }
 
 async function main() {
+  assert.strictEqual(tool.name, "ask_user");
+
   const predefined = await tool.execute("1", {
     question: "Choose",
     options: [

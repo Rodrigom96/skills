@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createAskQuestionTool } from "./ask-question";
+import { createAskUserTool } from "./ask-user";
 
 type ModeToolFactory = () => Parameters<ExtensionAPI["registerTool"]>[0];
 
@@ -7,7 +7,7 @@ export function createToolManager(pi: ExtensionAPI) {
   const modeTools = new Map<string, ModeToolFactory>();
   const registered = new Set<string>();
 
-  pi.registerTool(createAskQuestionTool());
+  pi.registerTool(createAskUserTool());
 
   return {
     registerModeTool(name: string, factory: ModeToolFactory): void { modeTools.set(name, factory); },
